@@ -53,7 +53,6 @@ void setup() {
 
   // Attach interrupts for rotary encoder channels
   attachInterrupt(digitalPinToInterrupt(clkPin), isrClk, CHANGE);
-  attachInterrupt(digitalPinToInterrupt(datPin), isrDat, CHANGE);
 }
 
 void loop() {
@@ -81,7 +80,7 @@ void loop() {
     int seconds = realRem % 60;
 
     // Clear previous line contents
-    lcd.print("     ");
+    lcd.print("       ");
 
     // Print time remaining
     lcd.setCursor(0, 1);
@@ -136,7 +135,8 @@ void loop() {
       washing = 1;
     }
   }
-
+  //update pressedLast state
+  pressedLast = pressed;
   // Slow loop slightly to reduce LCD flicker and CPU usage
   delay(100);
 }
@@ -148,20 +148,6 @@ void isrClk() {
 
   // Determine rotation direction by comparing CLK and DAT
   if (digitalRead(clkPin) == digitalRead(datPin)) {
-    position++;  // clockwise
-  } else {
-    // counterclockwise with lower bound at 0
-    position = (position >= 0) ? position - 1 : 0;
-  }
-}
-
-// Interrupt handler for DAT signal of rotary encoder
-void isrDat() {
-  // Ignore encoder changes while washing
-  if (washing) return;
-
-  // Determine rotation direction by comparing CLK and DAT
-  if (digitalRead(clkPin) != digitalRead(datPin)) {
     position++;  // clockwise
   } else {
     // counterclockwise with lower bound at 0
