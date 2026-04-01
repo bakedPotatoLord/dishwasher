@@ -1,33 +1,33 @@
-#include <LiquidCrystal.h>  // LCD display library
-#include <Servo.h>          // Servo library used to control ESC
+#include <LiquidCrystal_I2C.h>
+#include <Servo.h>  // Servo library used to control ESC
 
-// LCD pin definitions
-#define rs 9
-#define en 10
-#define d4 7
-#define d5 6
-#define d6 5
-#define d7 4
+#define u32 uint32_t
 
 // Rotary encoder pins
 #define datPin 2
 #define clkPin 3
 #define swPin 12
 
+//relay pin
+#define relayPin 17 //A3
+
+
+
 // ESC control pin and PWM values
 #define servoPin 11
-#define pwmStop 1500   // PWM value that stops the motor
-#define pwmRun 1650    // PWM value that runs the motor
+#define pwmStop 1500  // PWM value that stops the motor
+#define pwmRun 1650   // PWM value that runs the motor
 
 // Encoder position (represents wash time in seconds)
 volatile int position = 0;
 
 // Remaining wash time and start timestamp
-int remaining;
-int washStart;
+u32 remaining;
+u32 washStart;
 
 // Track button state from previous loop iteration
 u8 pressedLast = 0;
+
 
 // Flag indicating whether the dishwasher is currently running
 u8 washing = 0;
@@ -36,28 +36,41 @@ u8 washing = 0;
 Servo esc;
 
 // LCD object configured with pin definitions above
-LiquidCrystal lcd(rs, en, d4, d5, d6, d7);
+LiquidCrystal_I2C lcd(0x27, 16, 2);
 
 void setup() {
 
-  Serial.begin(9600);          // Initialize serial for debugging
-  esc.attach(servoPin);        // Attach ESC to servo control pin
+  
+
+  Serial.begin(9600);  // Initialize serial for debugging
+
+  Serial.println("howdy!");
+
+  esc.attach(servoPin);  // Attach ESC to servo control pin
 
   // initialize the LCD with 16 columns and 2 rows
-  lcd.begin(16, 2);
+  lcd.init();
+  lcd.backlight();
 
   // Configure encoder pins with pullups
   pinMode(swPin, INPUT_PULLUP);
   pinMode(clkPin, INPUT_PULLUP);
   pinMode(datPin, INPUT_PULLUP);
 
+  pinMode(relayPin,OUTPUT);
+
   // Attach interrupts for rotary encoder channels
   attachInterrupt(digitalPinToInterrupt(clkPin), isrClk, CHANGE);
 }
 
 void loop() {
-  // Temporarily disable interrupts while reading shared state
+
+  // Serial.println(position);
+  //   // Temporarily disable interrupts while reading shared state
   noInterrupts();
+  int savedPos = position;
+  // Re-enable interrupts
+  interrupts();
 
   if (washing) {
     // Display wash countdown
@@ -66,11 +79,21 @@ void loop() {
     lcd.setCursor(0, 1);
 
     // Calculate actual remaining time based on elapsed millis
-    int realRem = remaining - ((millis() - washStart) / 1000);
+    u32 now = millis();
+    u32 elapsed = ((now - washStart) / 1000);
+    int realRem = remaining - elapsed;
 
     // Stop motor and exit wash mode when timer expires
     if (realRem <= 0) {
+
+      // Serial.println("killing");
+      // Serial.println(now);
+      // Serial.println(washStart);
+      // Serial.println(remaining);
+      // Serial.println(realRem);
+
       esc.writeMicroseconds(pwmStop);
+      digitalWrite(relayPin,0);
       washing = 0;
       return;
     }
@@ -92,53 +115,60 @@ void loop() {
     // Display time-setting mode
     lcd.setCursor(0, 0);
     lcd.print("Set wash time ");
-    lcd.setCursor(0, 1);
+    // lcd.setCursor(0, 2);
 
     // Convert encoder position into minutes and seconds
-    int hours = position / 60;
-    int seconds = position % 60;
+    int hours = savedPos / 60;
+    int seconds = savedPos % 60;
 
     // Clear previous line contents
-    lcd.print("     ");
+    // lcd.print("     ");
 
     // Display currently selected time
     lcd.setCursor(0, 1);
     lcd.print(hours);
     lcd.print(':');
+    if (seconds < 9) lcd.print("0");
     lcd.print(seconds);
   }
 
-  // Re-enable interrupts
-  interrupts();
+
 
   // Read encoder pushbutton (active low)
   u8 pressed = !digitalRead(swPin);
+  // Serial.print("pressed: ");
+  // Serial.println(pressed);
 
   // Detect rising edge of button press
   if (!pressedLast && pressed) {
 
     // Wait for button release (simple debounce)
-    while(!digitalRead(swPin)){};
+    while (!digitalRead(swPin)) {};
 
     // Toggle washing state
     if (washing) {
       // Stop wash cycle
       esc.writeMicroseconds(pwmStop);
+      digitalWrite(relayPin,0);
       washing = 0;
     } else {
       // Start wash cycle
       esc.writeMicroseconds(pwmRun);
+      digitalWrite(relayPin,1);
 
+      // Serial.println("starting wash");
       // Capture current timer settings
       remaining = position;
       washStart = millis();
       washing = 1;
+      // Serial.print("wash start: ");
+      // Serial.println(washStart);
     }
   }
   //update pressedLast state
   pressedLast = pressed;
   // Slow loop slightly to reduce LCD flicker and CPU usage
-  delay(100);
+  delay(10);
 }
 
 // Interrupt handler for CLK signal of rotary encoder
@@ -147,10 +177,10 @@ void isrClk() {
   if (washing) return;
 
   // Determine rotation direction by comparing CLK and DAT
-  if (digitalRead(clkPin) == digitalRead(datPin)) {
+  if (digitalRead(clkPin) != digitalRead(datPin)) {
     position++;  // clockwise
   } else {
     // counterclockwise with lower bound at 0
-    position = (position >= 0) ? position - 1 : 0;
+    position = (position > 0) ? position - 1 : 0;
   }
 }
